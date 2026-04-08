@@ -27,9 +27,24 @@ logger = logging.getLogger(__name__)
 class WebScraper:
     def __init__(self, url: str, output_dir: str = "scraped_content", max_pages: int = 5, custom_urls: List[str] = None):
         self.url = url
-        self.output_dir = output_dir
+        self.base_output_dir = output_dir  # Keep original base directory
+        
+        # Create isolated folder per website to avoid mixing content
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc.replace('www.', '')
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        self.output_dir = f"{output_dir}/{domain}_{timestamp}"
+        
+        logger.info(f"Created isolated output directory: {self.output_dir}")
+        
         self.max_pages = max_pages
-        self.custom_urls = custom_urls or []
+        # IMPORTANT: Only use custom_urls if max_pages > 1 (multi-page mode)
+        # Single page mode (max_pages == 1) should NEVER use custom_urls
+        if max_pages == 1:
+            logger.info("Single-page mode detected: Ignoring custom_urls parameter")
+            self.custom_urls = []
+        else:
+            self.custom_urls = custom_urls or []
         self.visited_urls = set()
         self.pages_data = {}
         self.failed_downloads = []  # Queue for failed downloads
@@ -73,16 +88,26 @@ class WebScraper:
         # Convert relative to absolute
         absolute_url = urljoin(base_url, url)
         return absolute_url
+    
+    def is_same_domain(self, url: str) -> bool:
         """Check if URL is from the same domain."""
         base_domain = urlparse(self.url).netloc
         check_domain = urlparse(url).netloc
         return base_domain == check_domain
     
-    def get_page_links(self, html: str) -> List[str]:
-        """Extract all links from a page (excluding media files)."""
+    def get_page_links(self, html: str, current_page_url: str = None) -> List[str]:
+        """Extract all links from a page (excluding media files).
+        
+        Args:
+            html: The HTML content to extract links from
+            current_page_url: The URL of the current page (for accurate relative URL resolution)
+        """
         try:
             soup = BeautifulSoup(html, 'html.parser')
             links = []
+            
+            # Use current page URL for resolving relative links, fallback to self.url
+            base_url = current_page_url or self.url
             
             # Media file extensions to exclude from page crawling
             media_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.ico',
@@ -97,18 +122,22 @@ class WebScraper:
                         logger.info(f"  Skipping media file: {href}")
                         continue
                     
-                    # Convert relative URLs to absolute
-                    absolute_url = urljoin(self.url, href)
+                    # Convert relative URLs to absolute using current page as base
+                    absolute_url = urljoin(base_url, href)
                     
-                    # Filter to same domain and valid structure
+                    # CRITICAL: Filter to same domain ONLY
                     if self.is_same_domain(absolute_url) and absolute_url not in self.visited_urls:
                         # Remove fragments and query params for cleaner URLs
                         clean_url = absolute_url.split('#')[0]
                         if clean_url not in links:
                             links.append(clean_url)
-                            logger.info(f"  Found page link: {clean_url}")
+                            logger.info(f"  ✓ Found valid page link (same domain): {clean_url}")
+                    else:
+                        # Log skipped external links for debugging
+                        if not self.is_same_domain(absolute_url):
+                            logger.debug(f"  ✗ Skipped external link: {absolute_url}")
             
-            logger.info(f"Total page links found: {len(links)}")
+            logger.info(f"Total valid page links found: {len(links)}")
             return links
         except Exception as e:
             logger.error(f"Error extracting links: {e}")
@@ -172,10 +201,11 @@ class WebScraper:
             # Use custom URLs if provided, otherwise auto-discover
             if self.custom_urls:
                 to_visit = self.custom_urls.copy()
-                logger.info(f"Using {len(self.custom_urls)} custom URLs")
+                logger.info(f"🔗 CUSTOM URL MODE: Using {len(self.custom_urls)} provided URLs")
             else:
                 to_visit = [self.url]
-                logger.info("Auto-discovering pages from site")
+                logger.info(f"🔍 AUTO-DISCOVER MODE: Starting from {self.url}")
+                logger.info(f"⚠️  Will only follow links from domain: {urlparse(self.url).netloc}")
             
             page_count = 0
             original_output_dir = self.output_dir  # Store original before any modifications
@@ -255,7 +285,7 @@ class WebScraper:
                 
                 # Only discover new links if not using custom URLs
                 if not self.custom_urls:
-                    new_links = self.get_page_links(html)
+                    new_links = self.get_page_links(html, current_url)
                     for link in new_links:
                         if link not in self.visited_urls and link not in to_visit:
                             to_visit.append(link)

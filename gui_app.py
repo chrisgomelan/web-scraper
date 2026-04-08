@@ -141,14 +141,23 @@ class WebScraperGUI:
         if mode == "custom":
             # Enable custom URLs input for custom mode
             self.custom_urls_text.config(state=tk.NORMAL)
-            self.custom_urls_frame.config(text="Custom URLs (one per line) - REQUIRED FOR CUSTOM MODE")
+            self.custom_urls_frame.config(text="✓ Custom URLs (REQUIRED - one per line)")
         else:
             # Disable custom URLs input for auto-discovery and single-page modes
-            self.custom_urls_frame.config(text="Custom URLs (disabled - not used in this mode)")
+            if mode == "single":
+                self.custom_urls_frame.config(text="✗ Custom URLs DISABLED - Single page mode uses only the URL above")
+            else:
+                self.custom_urls_frame.config(text="✗ Custom URLs DISABLED - Auto-discover mode does not use sample_urls.txt")
             self.custom_urls_text.config(state=tk.DISABLED)
     
     def load_urls_file(self):
         """Load URLs from a text file."""
+        # Only allow loading URLs in custom mode
+        if self.mode_var.get() != "custom":
+            messagebox.showwarning("Warning", "Switch to 'Custom URL List' mode first to load URLs from file.\n\n"
+                                           "Single Page and Auto-discover modes do NOT use custom URLs.")
+            return
+        
         file_path = filedialog.askopenfilename(
             title="Select URL file",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")]

@@ -57,26 +57,49 @@ python gui_app.py
 ```
 
 This launches the user-friendly desktop interface. Choose from three scraping modes:
-- **Single Page**: Analyze one URL in detail
-- **Multi-Page Auto-discovery**: The app finds and scrapes linked pages automatically
-- **Custom URL List**: Load URLs from `sample_urls.txt` or your own file
+- **Single Page**: Extract content from one specific URL only
+- **Multi-Page Auto-discovery**: The app finds and scrapes linked pages within the same domain
+- **Custom URL List**: Scrape multiple URLs from a file (`sample_urls.txt` or your own)
+
+⚠️ **Important**: `sample_urls.txt` is **ONLY used in Custom URL List mode**. Single Page and Auto-discovery modes ignore it.
+
+### Scraping Modes Comparison
+
+| Feature | Single Page | Auto-Discovery | Custom URLs |
+|---------|-------------|----------------|------------|
+| **Input** | One URL above | One starting URL | File with multiple URLs |
+| **Discovers links?** | ❌ No | ✅ Yes (same domain only) | ❌ No |
+| **Uses sample_urls.txt?** | ❌ No | ❌ No | ✅ Yes |
+| **Best for** | Single page analysis | Full website crawl | Multiple unrelated sites |
+| **Domain constraint** | N/A | ✅ Yes (only same domain) | ❌ No (any domain) |
+| **Example** | Analyze 1 page | Scrape all pages of a website | Scrape 10 different websites |
 
 ### Key Functions
 
 #### **Single Page Mode**
+- Scrapes only the URL you enter
+- `sample_urls.txt` is ignored
+- Perfect for detailed analysis of one page
 1. Enter a URL
 2. Click "Start Scraping"
 3. Review results and export reports
 
-#### **Multi-Page Mode**
+#### **Multi-Page Auto-discovery Mode**
+- Starts from your URL and automatically discovers linked pages
+- **Only follows links within the same domain** (e.g., bps.edu.ph → stays on bps.edu.ph)
+- `sample_urls.txt` is ignored
 1. Enter the starting URL
-2. Set the maximum number of pages to scrape
-3. The app discovers links and scrapes them automatically
+2. Click "Start Scraping"
+3. The app discovers and scrapes linked pages automatically
 
-#### **Custom URL Mode**
-1. Prepare a text file with one URL per line
-2. Click "Load URLs from File"
-3. Click "Start Scraping"
+#### **Custom URL List Mode** ✓ Uses sample_urls.txt
+- Scrapes multiple URLs from a file
+- One URL per line
+- Useful for scraping multiple unrelated websites
+1. Switch to "Custom URL List" mode
+2. Click "📋 Load URLs from File" and select your file
+3. Or paste URLs directly in the text area
+4. Click "Start Scraping"
 
 ### Exporting Data
 
@@ -89,16 +112,40 @@ After scraping, you can export in multiple formats:
 
 ## Directory Structure
 
-Generated content is organized as follows:
+Each scraping session creates an **isolated folder per website** to prevent content mixing:
 
 ```
 scraped_content/
-├── images/           # Downloaded images
-├── videos/           # Downloaded videos
-├── text/             # Extracted text content
-├── pages/            # Individual page HTML/data
-└── reports/          # Exported reports (JSON, CSV, HTML, PDF)
+├── bps.edu.ph_2026-04-08_14-05-23/    # Isolated folder for BPS
+│   ├── pages/
+│   │   ├── page_1_home/
+│   │   │   ├── images/
+│   │   │   ├── videos/
+│   │   │   └── seo_analysis.txt
+│   │   ├── page_2_about/
+│   │   └── ...
+│   ├── images/
+│   ├── videos/
+│   ├── text/
+│   └── reports/
+│       ├── report.json
+│       ├── report.html
+│       ├── report.pdf
+│       └── headers.csv
+│
+└── cwcwake.com_2026-04-08_15-30-12/   # Isolated folder for CWC Wake
+    ├── pages/
+    ├── images/
+    ├── videos/
+    ├── text/
+    └── reports/
 ```
+
+**Benefits of isolated folders:**
+- ✅ No content mixing from different websites
+- ✅ Each scrape is independent and timestamped
+- ✅ ZIP exports only contain the current scrape
+- ✅ Easy to manage and delete old scrapes
 
 ## File Structure
 
@@ -118,6 +165,13 @@ See `requirements.txt` for complete dependencies. Key packages:
 
 ## Configuration
 
+### Domain Filtering
+When using **Auto-discovery mode**, the scraper is smart about staying on the same domain:
+- Starts from your provided URL (e.g., `https://bps.edu.ph/`)
+- Only follows internal links that belong to the same domain
+- Ignores external links to other websites
+- Ensures clean, focused scrapes without mixing content
+
 ### User Agent
 The app uses a standard browser user agent to avoid blocking:
 ```
@@ -129,6 +183,11 @@ Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 - Max retries for failed downloads: 3
 - Automatic retry with backoff for network issues
 
+### Image Format Conversion
+- All JPG/PNG images are automatically converted to **WebP** format
+- Provides better compression and faster loading
+- Original files are deleted after conversion
+
 ## Advanced Usage
 
 ### Using as a Module
@@ -136,19 +195,40 @@ Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 ```python
 from scraper import WebScraper
 
-# Single page scraping
-scraper = WebScraper(url="https://example.com")
-results = scraper.scrape_page(url="https://example.com")
+# Single page scraping (sample_urls.txt is IGNORED)
+scraper = WebScraper(url="https://example.com", max_pages=1)
+results = scraper.scrape(multi_page=False)
+
+# Auto-discovery mode (sample_urls.txt is IGNORED, only discovers from the starting URL)
+scraper = WebScraper(url="https://example.com", max_pages=5)
+results = scraper.scrape(multi_page=True)
+
+# Custom URL mode (uses sample_urls.txt or provided custom_urls)
+urls = ["https://site1.com", "https://site2.com"]
+scraper = WebScraper(url="https://site1.com", max_pages=999, custom_urls=urls)
+results = scraper.scrape(multi_page=True)
 
 # Export to different formats
 scraper.export_to_json(results)
 scraper.export_to_csv(results)
 scraper.export_to_html(results)
 scraper.export_to_pdf(results)
-
-# Create directory structure
-scraper.create_full_directory_structure()
 ```
+
+### Output Folder Structure
+
+Each scrape creates an isolated folder with the domain name and timestamp:
+```
+{output_dir}/{domain}_{YYYY-MM-DD_HH-MM-SS}/
+```
+
+Example: `scraped_content/bps.edu.ph_2026-04-08_14-05-23/`
+
+This ensures:
+- No accidental mixing of content from different websites
+- Easy cleanup of old scrapes
+- ZIP exports contain only current content
+- Multiple simultaneous scrapes won't conflict
 
 ### Batch Processing
 
