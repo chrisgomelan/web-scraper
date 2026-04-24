@@ -195,7 +195,8 @@ class WebScraper:
                 'total_videos': [],
                 'all_headers': {f'h{i}': [] for i in range(1, 7)},
                 'seo_analysis': {},
-                'categorized_text': []
+                'categorized_text': [],
+                'all_hyperlinks': []
             }
             
             # Use custom URLs if provided, otherwise auto-discover
@@ -244,6 +245,7 @@ class WebScraper:
                 page_seo = self.extract_seo_headers(html)
                 page_text = self.extract_text(html)
                 page_categorized_text = self.extract_text_by_category(html, current_url, page_count + 1, page_name)
+                page_hyperlinks = self.extract_hyperlinks(html, current_url, page_count + 1, page_name)
                 
                 # Save page-specific SEO analysis
                 seo_file = f"{page_folder}/seo_analysis.txt"
@@ -270,13 +272,15 @@ class WebScraper:
                     'page_folder': page_folder,
                     'images': page_images,
                     'videos': page_videos,
-                    'seo': page_seo
+                    'seo': page_seo,
+                    'hyperlinks': page_hyperlinks
                 }
                 
                 all_results['pages'].append(page_data)
                 all_results['total_images'].extend(page_images)
                 all_results['total_videos'].extend(page_videos)
                 all_results['categorized_text'].append(page_categorized_text)
+                all_results['all_hyperlinks'].extend(page_hyperlinks)
                 
                 # Merge headers
                 for level in range(1, 7):
@@ -498,6 +502,58 @@ class WebScraper:
         
         return aggregate_analysis
 
+    def extract_hyperlinks(self, html: str, page_url: str = None, page_number: int = 1, page_name: str = "page") -> List[Dict]:
+        """Extract all hyperlinks (<a> tags) from a page with metadata."""
+        try:
+            soup = BeautifulSoup(html, 'html.parser')
+            base_url = page_url or self.url
+            hyperlinks = []
+
+            for idx, tag in enumerate(soup.find_all('a', href=True), 1):
+                href = tag.get('href', '').strip()
+                if not href or href.startswith('javascript:') or href == '#':
+                    continue
+
+                # Resolve relative URLs
+                absolute_url = urljoin(base_url, href)
+
+                link_type = 'internal' if self.is_same_domain(absolute_url) else 'external'
+
+                hyperlinks.append({
+                    'page_number': page_number,
+                    'page_name': page_name,
+                    'page_url': base_url,
+                    'order': idx,
+                    'link_text': tag.get_text(strip=True)[:200],
+                    'href': absolute_url,
+                    'raw_href': href,
+                    'title': tag.get('title', ''),
+                    'rel': ' '.join(tag.get('rel', [])),
+                    'target': tag.get('target', ''),
+                    'type': link_type
+                })
+
+            # Save hyperlinks to a text file inside the page folder
+            links_txt = f"{self.output_dir}/hyperlinks.txt"
+            with open(links_txt, 'w', encoding='utf-8') as f:
+                f.write(f"HYPERLINKS FOUND ON: {base_url}\n")
+                f.write(f"Total: {len(hyperlinks)}\n")
+                f.write("=" * 70 + "\n\n")
+                for lnk in hyperlinks:
+                    f.write(f"{lnk['order']}. [{lnk['type'].upper()}] {lnk['link_text'] or '(no text)'}\n")
+                    f.write(f"   URL  : {lnk['href']}\n")
+                    if lnk['title']:
+                        f.write(f"   Title: {lnk['title']}\n")
+                    if lnk['rel']:
+                        f.write(f"   Rel  : {lnk['rel']}\n")
+                    f.write("\n")
+
+            logger.info(f"Extracted {len(hyperlinks)} hyperlinks from page {page_number} → {links_txt}")
+            return hyperlinks
+        except Exception as e:
+            logger.error(f"Error extracting hyperlinks: {e}")
+            return []
+
     def extract_text_by_category(self, html: str, page_url: str = None, page_number: int = 1, page_name: str = "page") -> List[Dict]:
         """Extract text organized by HTML tag categories (h1, h2, h3, p, li, etc.)."""
         try:
@@ -542,6 +598,44 @@ class WebScraper:
         except Exception as e:
             logger.error(f"Error extracting categorized text: {e}")
             return []
+
+    def export_hyperlinks_to_csv(self, all_hyperlinks: List[Dict]) -> str:
+        """Export all collected hyperlinks from all pages to a single CSV."""
+        try:
+            if not all_hyperlinks:
+                logger.warning("No hyperlink data to export")
+                return None
+
+            Path(f"{self.output_dir}/reports").mkdir(exist_ok=True)
+            csv_file = f"{self.output_dir}/reports/hyperlinks.csv"
+
+            with open(csv_file, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow([
+                    'Page Number', 'Page Name', 'Page URL',
+                    'Order', 'Link Text', 'Absolute URL', 'Raw Href',
+                    'Title', 'Rel', 'Target', 'Type'
+                ])
+                for lnk in all_hyperlinks:
+                    writer.writerow([
+                        lnk.get('page_number', ''),
+                        lnk.get('page_name', ''),
+                        lnk.get('page_url', ''),
+                        lnk.get('order', ''),
+                        lnk.get('link_text', ''),
+                        lnk.get('href', ''),
+                        lnk.get('raw_href', ''),
+                        lnk.get('title', ''),
+                        lnk.get('rel', ''),
+                        lnk.get('target', ''),
+                        lnk.get('type', '')
+                    ])
+
+            logger.info(f"✓ Hyperlinks CSV exported: {csv_file} ({len(all_hyperlinks)} rows)")
+            return csv_file
+        except Exception as e:
+            logger.error(f"Error exporting hyperlinks to CSV: {e}")
+            return None
 
     def export_categorized_text_to_csv(self, all_pages_data: List[List[Dict]]) -> str:
         """Export categorized text from all pages to CSV format."""
@@ -1010,7 +1104,21 @@ class WebScraper:
             categorized_csv = self.export_categorized_text_to_csv(categorized_text)
             if categorized_csv:
                 exports['categorized_text_csv'] = categorized_csv
-        
+
+        # Export hyperlinks to CSV
+        # Flatten: results may store a list-of-lists (multi-page) or a flat list (single-page)
+        raw_links = results.get('all_hyperlinks', results.get('hyperlinks', []))
+        flat_links = []
+        for item in raw_links:
+            if isinstance(item, list):
+                flat_links.extend(item)
+            elif isinstance(item, dict):
+                flat_links.append(item)
+        if flat_links:
+            hyperlinks_csv = self.export_hyperlinks_to_csv(flat_links)
+            if hyperlinks_csv:
+                exports['hyperlinks_csv'] = hyperlinks_csv
+
         # Create zip export of all scraped content
         zip_file = self.create_zip_export()
         if zip_file:
@@ -1267,7 +1375,8 @@ class WebScraper:
                 return {'success': False}
             
             page_categorized_text = self.extract_text_by_category(html, self.url, 1, 'home')
-            
+            page_hyperlinks = self.extract_hyperlinks(html, self.url, 1, 'home')
+
             results = {
                 'success': True,
                 'mode': 'single-page',
@@ -1275,7 +1384,8 @@ class WebScraper:
                 'seo_analysis': self.extract_seo_headers(html),
                 'images': self.extract_and_download_images(html, self.url),
                 'videos': self.extract_and_download_videos(html, self.url),
-                'categorized_text': [page_categorized_text]
+                'categorized_text': [page_categorized_text],
+                'hyperlinks': page_hyperlinks
             }
         
         # Retry failed downloads

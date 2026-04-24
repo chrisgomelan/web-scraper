@@ -113,6 +113,7 @@ class WebScraperGUI:
         ttk.Button(reports_button_frame, text="📋 View CSV Headers", command=self.open_csv_headers).pack(side=tk.LEFT, padx=5)
         ttk.Button(reports_button_frame, text="📑 View PDF Report", command=self.open_pdf_report).pack(side=tk.LEFT, padx=5)
         ttk.Button(reports_button_frame, text="📈 View Text CSV", command=self.open_categorized_text_csv).pack(side=tk.LEFT, padx=5)
+        ttk.Button(reports_button_frame, text="🔗 View Links CSV", command=self.open_hyperlinks_csv).pack(side=tk.LEFT, padx=5)
         ttk.Button(reports_button_frame, text="📦 Open ZIP Export", command=self.open_zip_export).pack(side=tk.LEFT, padx=5)
         
         self.reports_text = scrolledtext.ScrolledText(reports_frame, height=20, width=80, wrap=tk.WORD)
@@ -293,7 +294,8 @@ class WebScraperGUI:
     def _display_singlepage_results(self) -> str:
         """Display single-page scraping results."""
         failed_downloads = self.results.get('failed_downloads', [])
-        
+        hyperlinks = self.results.get('hyperlinks', [])
+
         summary = f"""
 {'='*70}
 SCRAPING RESULTS SUMMARY (Single Page)
@@ -308,6 +310,7 @@ CONTENT STATISTICS
 
 Images Downloaded: {len(self.results.get('images', []))}
 Videos Found: {len(self.results.get('videos', []))}
+Hyperlinks Found: {len(hyperlinks)}
 Failed Downloads (unrecoverable): {len(failed_downloads)}
 
 Image List:
@@ -326,7 +329,7 @@ Image List:
         if failed_downloads:
             summary += f"\n\n{'='*70}\nFAILED DOWNLOADS (Could not recover)\n{'='*70}\n"
             for item in failed_downloads[:10]:  # Show first 10
-                summary += f"\n• {item['type'].upper()}: {item['url'][:60]}..."
+                summary += f"\n\u2022 {item['type'].upper()}: {item['url'][:60]}..."
             
             if len(failed_downloads) > 10:
                 summary += f"\n\n... and {len(failed_downloads) - 10} more\n"
@@ -336,14 +339,15 @@ Image List:
         
         summary += f"\n\nOutput Directory: {self.scraper.output_dir}"
         return summary
-    
+
     def _display_multipage_results(self) -> str:
         """Display multi-page scraping results."""
         pages = self.results.get('pages', [])
         total_images = self.results.get('total_images', [])
         total_videos = self.results.get('total_videos', [])
+        total_hyperlinks = self.results.get('all_hyperlinks', [])
         failed_downloads = self.results.get('failed_downloads', [])
-        
+
         summary = f"""
 {'='*70}
 SCRAPING RESULTS SUMMARY (Multi-Page)
@@ -359,6 +363,7 @@ OVERALL STATISTICS
 Total Pages Scraped: {len(pages)}
 Total Images Downloaded: {len(total_images)}
 Total Videos Found: {len(total_videos)}
+Total Hyperlinks Found: {len(total_hyperlinks)}
 Failed Downloads (unrecoverable): {len(failed_downloads)}
 
 {'='*70}
@@ -371,24 +376,25 @@ PAGES SCRAPED (with individual folders)
             summary += f"\n  Folder: {page_data.get('page_folder', 'N/A')}"
             summary += f"\n  Images: {len(page_data.get('images', []))}"
             summary += f"\n  Videos: {len(page_data.get('videos', []))}"
+            summary += f"\n  Hyperlinks: {len(page_data.get('hyperlinks', []))}"
             seo = page_data.get('seo', {}).get('seo_analysis', {})
             summary += f"\n  H1 Tags: {seo.get('h1_count', 0)}"
             summary += f"\n  Score: {seo.get('content_structure_score', 0)}/100"
-        
+
         if failed_downloads:
             summary += f"\n\n{'='*70}\nFAILED DOWNLOADS (Could not recover)\n{'='*70}\n"
             for item in failed_downloads[:10]:  # Show first 10
-                summary += f"\n• {item['type'].upper()}: {item['url'][:60]}..."
-            
+                summary += f"\n\u2022 {item['type'].upper()}: {item['url'][:60]}..."
+
             if len(failed_downloads) > 10:
                 summary += f"\n\n... and {len(failed_downloads) - 10} more\n"
-            
+
             summary += "\n\nNote: These are typically 404 errors (files not found on server)."
             summary += "\n      The scraper retried these 3 times automatically."
-        
+
         summary += f"\n\nOutput Directory: {self.scraper.output_dir}"
         return summary
-    
+
     def display_seo_analysis(self):
         """Display SEO analysis results."""
         if not self.results:
@@ -483,6 +489,8 @@ The following files have been generated:
             export_text += f"✓ CSV Assets: {exports['csv'][1]}\n"
         if exports.get('categorized_text_csv'):
             export_text += f"✓ Categorized Text CSV: {exports['categorized_text_csv']}\n"
+        if exports.get('hyperlinks_csv'):
+            export_text += f"✓ Hyperlinks CSV: {exports['hyperlinks_csv']}\n"
         if exports.get('html'):
             export_text += f"✓ HTML Report: {exports['html']}\n"
         if exports.get('pdf'):
@@ -511,11 +519,13 @@ OUTPUT DIRECTORY STRUCTURE
 │   ├── page_1_home/
 │   │   ├── images/      [page-specific images]
 │   │   ├── videos/      [page-specific videos]
+│   │   ├── hyperlinks.txt
 │   │   ├── content.txt
 │   │   └── seo_analysis.txt
 │   ├── page_2_about/
 │   │   ├── images/
 │   │   ├── videos/
+│   │   ├── hyperlinks.txt
 │   │   ├── content.txt
 │   │   └── seo_analysis.txt
 │   └── ...
@@ -525,6 +535,7 @@ OUTPUT DIRECTORY STRUCTURE
     ├── report.html
     ├── headers.csv
     ├── assets.csv
+    ├── hyperlinks.csv                  [All hyperlinks across pages]
     └── categorized_text_content.csv    [Text by H1-H6, paragraphs, etc.]
 
 {'='*70}
@@ -646,6 +657,17 @@ Videos: {len(self.results.get('videos', []))}
                 messagebox.showerror("Error", "Zip export not found")
         else:
             messagebox.showerror("Error", "No zip export generated yet. Start scraping first.")
+
+    def open_hyperlinks_csv(self):
+        """Open hyperlinks CSV in default spreadsheet app."""
+        if self.results and self.results.get('exports', {}).get('hyperlinks_csv'):
+            csv_file = self.results['exports']['hyperlinks_csv']
+            if os.path.exists(csv_file):
+                os.startfile(csv_file)
+            else:
+                messagebox.showerror("Error", "Hyperlinks CSV not found")
+        else:
+            messagebox.showerror("Error", "No hyperlinks CSV generated yet. Start scraping first.")
 
 
 if __name__ == "__main__":
